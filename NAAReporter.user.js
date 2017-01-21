@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NAA Reporter
 // @namespace    https://github.com/Tunaki/stackoverflow-userscripts
-// @version      0.10
+// @version      0.11
 // @description  Adds a NAA link below answers that sends a report for Natty in SOBotics. Intended to be used for answers flaggable as NAA / VLQ.
 // @author       Tunaki
 // @include      /^https?:\/\/\w*.?stackoverflow.com\/.*/
@@ -27,7 +27,7 @@ function sendChatMessage(msg) {
   });
 }
 
-function sendSentinelAndChat(answerId) {
+function sendSentinelAndChat(answerId, feedback) {
   var link = 'http://stackoverflow.com/a/' + answerId;
   var match = /(?:https?:\/\/)?(?:www\.)?(.*)\.com\/(.*)(?:\/([0-9]+))?/g.exec(link);
   var sentinelUrl = 'http://www.' + match[1] + '.com/' + match[2];
@@ -41,11 +41,12 @@ function sendSentinelAndChat(answerId) {
       }
       var sentinelJson = JSON.parse(sentinelResponse.responseText);
       if (sentinelJson.items.length > 0) {
-        sendChatMessage('@Natty feedback ' + link + ' tp');
-      } else {
+        sendChatMessage('@Natty feedback ' + link + ' ' + feedback);
+      } else if (feedback === 'tp') {
         sendChatMessage('@Natty report ' + link);
       }
-      $('[data-answerid="' + answerId + '"] a.report-naa-link').addClass('naa-reported').click(function (e) { e.preventDefault(); }).html('NAA reported!');
+      $('[data-answerid="' + answerId + '"] a.report-naa-link').addClass('naa-reported').click(function (e) { e.preventDefault(); }).html('Feedback sent!');
+      $('[data-answerid="' + answerId + '"] a.report-nefp-link').addClass('naa-reported').click(function (e) { e.preventDefault(); }).html('');
     },
     onerror: function (sentinelResponse) {
       alert('Error while reporting: ' + sentinelResponse.responseText);
@@ -63,7 +64,7 @@ function sendRequest(event) {
       $.get('//api.stackexchange.com/2.2/posts/'+messageJSON[1]+'?site=stackoverflow&key=qhq7Mdy8)4lSXLCjrzQFaQ((&filter=!3tz1WbZYQxC_IUm7Z', function(aRes) {
       // post is deleted, just report it (it can only be an answer since VLQ-flaggable question are only from review, thus not deleted), otherwise, check that it is really an answer and then its date
       if (aRes.items.length === 0) {
-        sendSentinelAndChat(messageJSON[1]);
+        sendSentinelAndChat(messageJSON[1], 'tp');
       } else if (aRes.items[0]['post_type'] === 'answer') {
         var answerDate = aRes.items[0]['creation_date'];
         var currentDate = Date.now() / 1000;
@@ -73,11 +74,27 @@ function sendRequest(event) {
             var questionDate = qRes.items[0]['creation_date'];
             // only do something when answer was posted at least 30 days after the question
             if (Math.round((answerDate - questionDate) / (24 * 60 * 60)) > 30) {
-              sendSentinelAndChat(messageJSON[1]);
+              sendSentinelAndChat(messageJSON[1], 'tp');
             }
           });
         }
       }
+    });
+  }
+  if (messageJSON[0] == 'postHrefReportNe' || messageJSON[0] == 'postHrefReportFp') {
+    var feedback;
+    if (messageJSON[0] == 'postHrefReportNe') {
+      feedback = 'ne';
+    }
+    else {
+      feedback = 'fp';
+    }
+    // Reporting ne or fp only makes sense when Natty allready saw the post, so we don't need the time check here. Rest as for tp above.
+    $.get('//api.stackexchange.com/2.2/posts/'+messageJSON[1]+'?site=stackoverflow&key=qhq7Mdy8)4lSXLCjrzQFaQ((&filter=!3tz1WbZYQxC_IUm7Z', function(aRes) {
+      // post is deleted, just report it (it can only be an answer since VLQ-flaggable question are only from review, thus not deleted), otherwise, check that it is really an answer and then its date
+      if (aRes.items.length === 0 || aRes.items[0]['post_type'] === 'answer') {
+        sendSentinelAndChat(messageJSON[1], feedback);
+      } 
     });
   }
 };
@@ -109,6 +126,18 @@ const ScriptToInject = function() {
         if ($(this).hasClass('naa-reported') || !confirm('Do you really want to report this post as NAA?')) return false;
         window.postMessage(JSON.stringify(['postHrefReportNAA', postId]), "*");
       }).html('NAA'));
+      $this.append($('<span>').attr('class', 'lsep').html('|'));
+      $this.append($('<a>').attr('class', 'report-nefp-link').click(function (e) {
+        e.preventDefault();
+        if ($(this).hasClass('naa-reported') || !confirm('Do you really want to report this post as Needs Edit?')) return false;
+        window.postMessage(JSON.stringify(['postHrefReportNe', postId]), "*");
+      }).html('Ne'));
+      $this.append($('<span>').attr('class', 'lsep').html('|'));
+      $this.append($('<a>').attr('class', 'report-nefp-link').click(function (e) {
+        e.preventDefault();
+        if ($(this).hasClass('naa-reported') || !confirm('Do you really want to report this post as False Positive?')) return false;
+        window.postMessage(JSON.stringify(['postHrefReportFp', postId]), "*");
+      }).html('Fp'));
     });
   };
 
